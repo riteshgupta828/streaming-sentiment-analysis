@@ -1,0 +1,54 @@
+{
+  "knowledge_base_configuration": {
+    "knowledge_base_id": "YOUR_KB_ID_HERE",
+    "data_source_id": "YOUR_DATA_SOURCE_ID_HERE",
+    "embedding_model": "amazon.titan-embed-text-v1",
+    "vector_index_name": "streaming-sentiment-index",
+    "retrieval_configuration": {
+      "vector_search_configuration": {
+        "number_of_results": 25,
+        "override_search_type": "HYBRID"
+      }
+    }
+  },
+  "search_optimization": {
+    "chunking_strategy": "FIXED_SIZE",
+    "chunk_size": 500,
+    "overlap_percentage": 20,
+    "metadata_fields": [
+      "source_file",
+      "processed_timestamp",
+      "content_category",
+      "sentiment_preliminary"
+    ]
+  },
+  "quality_filters": {
+    "minimum_relevance_score": 0.7,
+    "exclude_duplicate_content": true,
+    "date_range_priority": "recent_first",
+    "content_length_minimum": 50
+  },
+  "performance_settings": {
+    "max_retrieval_time_ms": 2000,
+    "cache_results": true,
+    "cache_duration_minutes": 30,
+    "enable_semantic_search": true
+  },
+  "business_context": {
+    "domain_focus": "streaming_services",
+    "analysis_categories": [
+      "content_quality",
+      "technical_performance", 
+      "pricing_value",
+      "user_experience",
+      "content_variety",
+      "customer_service"
+    ],
+    "sentiment_weighting": {
+      "technical_issues": 1.5,
+      "pricing_concerns": 1.3,
+      "content_praise": 1.2,
+      "competitive_mentions": 1.4
+    }
+  }
+}
