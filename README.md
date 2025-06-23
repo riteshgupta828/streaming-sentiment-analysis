@@ -255,10 +255,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📊 Project Stats
 
-![GitHub stars](https://img.shields.io/github/stars/yourusername/streaming-sentiment-analysis?style=social)
-![GitHub forks](https://img.shields.io/github/forks/yourusername/streaming-sentiment-analysis?style=social)
-![GitHub issues](https://img.shields.io/github/issues/yourusername/streaming-sentiment-analysis)
-![GitHub license](https://img.shields.io/github/license/yourusername/streaming-sentiment-analysis)
+![GitHub stars](https://img.shields.io/github/stars/riteshgupta828/streaming-sentiment-analysis?style=social)
+![GitHub forks](https://img.shields.io/github/forks/riteshgupta828/streaming-sentiment-analysis?style=social)
+![GitHub issues](https://img.shields.io/github/issues/riteshgupta828/streaming-sentiment-analysis)
+![GitHub license](https://img.shields.io/github/license/riteshgupta828/streaming-sentiment-analysis)
 
 ## 📝 Disclaimer
 
