@@ -258,7 +258,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👨‍💻 Author
 
 **Your Name**
-- LinkedIn: [Your LinkedIn](https://linkedin.com/in/riteshgupta828/)
+- LinkedIn: [Ritesh Gupta](https://linkedin.com/in/riteshgupta828/)
 - Email: gritesh@gmail.com
 
 ## 🙏 Acknowledgments
