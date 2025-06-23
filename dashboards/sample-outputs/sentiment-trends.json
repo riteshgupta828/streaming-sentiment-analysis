@@ -1,1 +1,53 @@
-
+{
+  "dashboard_data": {
+    "properties": [
+      {
+        "name": "Premium Streaming Service",
+        "sentiment_score": 85,
+        "total_mentions": 2341,
+        "trend": "positive",
+        "primary_themes": ["content_quality", "user_experience"],
+        "action_required": false
+      },
+      {
+        "name": "Movie Streaming Platform", 
+        "sentiment_score": 72,
+        "total_mentions": 1897,
+        "trend": "positive",
+        "primary_themes": ["content_variety", "pricing_value"],
+        "action_required": false
+      },
+      {
+        "name": "Sports Streaming",
+        "sentiment_score": 64,
+        "total_mentions": 1234, 
+        "trend": "mixed_positive",
+        "primary_themes": ["content_availability", "technical_performance"],
+        "action_required": false
+      },
+      {
+        "name": "News Streaming",
+        "sentiment_score": 45,
+        "total_mentions": 892,
+        "trend": "mixed_negative", 
+        "primary_themes": ["technical_performance", "content_quality"],
+        "action_required": true
+      },
+      {
+        "name": "Kids Content Streaming",
+        "sentiment_score": 38,
+        "total_mentions": 567,
+        "trend": "negative",
+        "primary_themes": ["pricing_value", "content_variety"],
+        "action_required": true
+      }
+    ],
+    "summary_metrics": {
+      "total_mentions_analyzed": 6931,
+      "properties_tracked": 5,
+      "overall_portfolio_sentiment": 68,
+      "properties_needing_attention": 2,
+      "analysis_confidence": 87
+    }
+  }
+}
