@@ -1,1 +1,1579 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Streaming Service Sentiment Analysis Platform - Complete Infrastructure Stack'
 
+Parameters:
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues: [development, staging, production]
+    Description: Environment name for resource tagging and configuration
+    
+  BucketName:
+    Type: String
+    Default: streaming-sentiment-analysis
+    Description: S3 bucket name for data storage (must be globally unique)
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]
+
+Resources:
+  # ===============================================
+  # S3 Storage Resources
+  # ===============================================
+  
+  DataStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketName}-${Environment}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt KBAutoSyncFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: socialgist-kb/
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: Streaming-Sentiment-Analysis
+        - Key: Purpose
+          Value: Data Storage
+
+  # ===============================================
+  # IAM Roles and Policies
+  # ===============================================
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'Streaming-Lambda-Execution-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock-agent:Retrieve
+                  - bedrock-agent:StartIngestionJob
+                  - bedrock-agent:GetIngestionJob
+                  - bedrock-agent:ListIngestionJobs
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'Streaming-Bedrock-KB-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/socialgist-kb/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: OpenSearchServerlessAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+
+  # ===============================================
+  # Lambda Functions
+  # ===============================================
+  
+  DataCleanerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'SGJsonExtractor-RawtoClean-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: Streaming-Sentiment-Analysis
+        - Key: Function
+          Value: Data-Cleaner
+
+  KBAutoSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'KB-AutoSync-OnS3Upload-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          DATA_SOURCE_ID: !Ref BedrockDataSource
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: Streaming-Sentiment-Analysis
+        - Key: Function
+          Value: KB-AutoSync
+
+  SentimentAnalyzerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'bulk-sentiment-analyzer-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          S3_BUCKET: !Ref DataStorageBucket
+          MIN_MENTIONS_THRESHOLD: '3'
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: Sentiment-Analyzer
+
+  # ===============================================
+  # Lambda Permissions
+  # ===============================================
+  
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KBAutoSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt DataStorageBucket.Arn
+
+  # ===============================================
+  # OpenSearch Serverless for Bedrock
+  # ===============================================
+  
+  OpenSearchCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: !Sub 'streaming-sentiment-collection-${Environment}'
+      Type: VECTORSEARCH
+      Description: Vector collection for streaming sentiment analysis knowledge base
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+
+  OpenSearchSecurityPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'streaming-sentiment-security-policy-${Environment}'
+      Type: encryption
+      Policy: !Sub |
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/streaming-sentiment-collection-${Environment}"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  OpenSearchNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'streaming-sentiment-network-policy-${Environment}'
+      Type: network
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/streaming-sentiment-collection-${Environment}"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/streaming-sentiment-collection-${Environment}"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
+  OpenSearchDataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub 'streaming-sentiment-data-policy-${Environment}'
+      Type: data
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/streaming-sentiment-collection-${Environment}"],
+                "Permission": [
+                  "aoss:CreateCollectionItems",
+                  "aoss:DeleteCollectionItems",
+                  "aoss:UpdateCollectionItems",
+                  "aoss:DescribeCollectionItems"
+                ]
+              },
+              {
+                "ResourceType": "index",
+                "Resource": ["index/streaming-sentiment-collection-${Environment}/*"],
+                "Permission": [
+                  "aoss:CreateIndex",
+                  "aoss:DeleteIndex",
+                  "aoss:UpdateIndex",
+                  "aoss:DescribeIndex",
+                  "aoss:ReadDocument",
+                  "aoss:WriteDocument"
+                ]
+              }
+            ],
+            "Principal": [
+              "${BedrockKnowledgeBaseRole.Arn}"
+            ]
+          }
+        ]
+
+  # ===============================================
+  # Bedrock Knowledge Base
+  # ===============================================
+  
+  BedrockKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn: OpenSearchCollection
+    Properties:
+      Name: !Sub '${KnowledgeBaseName}-${Environment}'
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: OPENSEARCH_SERVERLESS
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt OpenSearchCollection.Arn
+          VectorIndexName: streaming-sentiment-index
+          FieldMapping:
+            VectorField: vector
+            TextField: text
+            MetadataField: metadata
+      Tags:
+        Environment: !Ref Environment
+        Project: Streaming-Sentiment-Analysis
+
+  BedrockDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref BedrockKnowledgeBase
+      Name: !Sub 'Streaming-S3-DataSource-${Environment}'
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt DataStorageBucket.Arn
+          InclusionPrefixes:
+            - socialgist-kb/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 500
+            OverlapPercentage: 20
+
+  # ===============================================
+  # CloudWatch Monitoring
+  # ===============================================
+  
+  SNSAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'Streaming-Sentiment-Alerts-${Environment}'
+      DisplayName: Streaming Sentiment Analysis Alerts
+      Subscription:
+        - Endpoint: !Ref NotificationEmail
+          Protocol: email
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'Streaming-Lambda-Errors-${Environment}'
+      AlarmDescription: Alert when Lambda functions encounter errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  HighCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'Streaming-High-Costs-${Environment}'
+      AlarmDescription: Alert when daily costs exceed threshold
+      MetricName: EstimatedCharges
+      Namespace: AWS/Billing
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  # ===============================================
+  # Custom Resources for Setup
+  # ===============================================
+  
+  CustomSetupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'Streaming-Setup-Helper-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      s3 = boto3.client('s3')
+                      bucket = event['ResourceProperties']['BucketName']
+                      
+                      # Create folder structure
+                      folders = [
+                          'reddit/socialgist-raw/',
+                          'socialgist-processed/',
+                          'socialgist-kb/',
+                          'sentiment-trend-analyzer/'
+                      ]
+                      
+                      for folder in folders:
+                          s3.put_object(Bucket=bucket, Key=folder)
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  SetupBucketStructure:
+    Type: Custom::SetupBucketStructure
+    Properties:
+      ServiceToken: !GetAtt CustomSetupFunction.Arn
+      BucketName: !Ref DataStorageBucket
+
+# ===============================================
+# Outputs
+# ===============================================
+
+Outputs:
+  DataStorageBucket:
+    Description: S3 bucket for data storage
+    Value: !Ref DataStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucket'
+
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !Ref BedrockKnowledgeBase
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
+
+  DataSourceId:
+    Description: Bedrock Data Source ID
+    Value: !Ref BedrockDataSource
+    Export:
+      Name: !Sub '${AWS::StackName}-DataSourceId'
+
+  DataCleanerFunctionArn:
+    Description: Data Cleaner Lambda Function ARN
+    Value: !GetAtt DataCleanerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataCleanerFunction'
+
+  SentimentAnalyzerFunctionArn:
+    Description: Sentiment Analyzer Lambda Function ARN
+    Value: !GetAtt SentimentAnalyzerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SentimentAnalyzerFunction'
+
+  QuickSightDataPath:
+    Description: S3 path for QuickSight data source
+    Value: !Sub 's3://${DataStorageBucket}/sentiment-trend-analyzer/sentiment-trends-quicksight.json'
+    Export:
+      Name: !Sub '${AWS::StackName}-QuickSightDataPath'
+
+  Environment:
+    Description: Environment name
+    Value: !Ref Environment
+    Export:
+      Name: !Sub '${AWS::StackName}-Environment'
+    
+  KnowledgeBaseName:
+    Type: String
+    Default: Streaming-Sentiment-KB
+    Description: Name for the Bedrock Knowledge Base
+    
+  NotificationEmail:
+    Type: String
+    Description: Email address for monitoring alerts
+    AllowedPattern: '^[^\s@]+@[^\s@]+\.[^\s@]+
+
+Resources:
+  # ===============================================
+  # S3 Storage Resources
+  # ===============================================
+  
+  DataStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketName}-${Environment}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt KBAutoSyncFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: socialgist-kb/
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Purpose
+          Value: Data Storage
+
+  # ===============================================
+  # IAM Roles and Policies
+  # ===============================================
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'WBD-Lambda-Execution-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock-agent:Retrieve
+                  - bedrock-agent:StartIngestionJob
+                  - bedrock-agent:GetIngestionJob
+                  - bedrock-agent:ListIngestionJobs
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'WBD-Bedrock-KB-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/socialgist-kb/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: OpenSearchServerlessAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+
+  # ===============================================
+  # Lambda Functions
+  # ===============================================
+  
+  DataCleanerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'SGJsonExtractor-RawtoClean-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: Data-Cleaner
+
+  KBAutoSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'KB-AutoSync-OnS3Upload-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          DATA_SOURCE_ID: !Ref BedrockDataSource
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: KB-AutoSync
+
+  SentimentAnalyzerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'bulk-sentiment-analyzer-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          S3_BUCKET: !Ref DataStorageBucket
+          MIN_MENTIONS_THRESHOLD: '3'
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: Sentiment-Analyzer
+
+  # ===============================================
+  # Lambda Permissions
+  # ===============================================
+  
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KBAutoSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt DataStorageBucket.Arn
+
+  # ===============================================
+  # OpenSearch Serverless for Bedrock
+  # ===============================================
+  
+  OpenSearchCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: !Sub 'wbd-sentiment-collection-${Environment}'
+      Type: VECTORSEARCH
+      Description: Vector collection for WBD sentiment analysis knowledge base
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+
+  OpenSearchSecurityPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-security-policy-${Environment}'
+      Type: encryption
+      Policy: !Sub |
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  OpenSearchNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-network-policy-${Environment}'
+      Type: network
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
+  OpenSearchDataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-data-policy-${Environment}'
+      Type: data
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"],
+                "Permission": [
+                  "aoss:CreateCollectionItems",
+                  "aoss:DeleteCollectionItems",
+                  "aoss:UpdateCollectionItems",
+                  "aoss:DescribeCollectionItems"
+                ]
+              },
+              {
+                "ResourceType": "index",
+                "Resource": ["index/wbd-sentiment-collection-${Environment}/*"],
+                "Permission": [
+                  "aoss:CreateIndex",
+                  "aoss:DeleteIndex",
+                  "aoss:UpdateIndex",
+                  "aoss:DescribeIndex",
+                  "aoss:ReadDocument",
+                  "aoss:WriteDocument"
+                ]
+              }
+            ],
+            "Principal": [
+              "${BedrockKnowledgeBaseRole.Arn}"
+            ]
+          }
+        ]
+
+  # ===============================================
+  # Bedrock Knowledge Base
+  # ===============================================
+  
+  BedrockKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn: OpenSearchCollection
+    Properties:
+      Name: !Sub '${KnowledgeBaseName}-${Environment}'
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: OPENSEARCH_SERVERLESS
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt OpenSearchCollection.Arn
+          VectorIndexName: wbd-sentiment-index
+          FieldMapping:
+            VectorField: vector
+            TextField: text
+            MetadataField: metadata
+      Tags:
+        Environment: !Ref Environment
+        Project: WBD-Sentiment-Analysis
+
+  BedrockDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref BedrockKnowledgeBase
+      Name: !Sub 'WBD-S3-DataSource-${Environment}'
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt DataStorageBucket.Arn
+          InclusionPrefixes:
+            - socialgist-kb/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 500
+            OverlapPercentage: 20
+
+  # ===============================================
+  # CloudWatch Monitoring
+  # ===============================================
+  
+  SNSAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'WBD-Sentiment-Alerts-${Environment}'
+      DisplayName: WBD Sentiment Analysis Alerts
+      Subscription:
+        - Endpoint: !Ref NotificationEmail
+          Protocol: email
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'WBD-Lambda-Errors-${Environment}'
+      AlarmDescription: Alert when Lambda functions encounter errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  HighCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'WBD-High-Costs-${Environment}'
+      AlarmDescription: Alert when daily costs exceed threshold
+      MetricName: EstimatedCharges
+      Namespace: AWS/Billing
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  # ===============================================
+  # Custom Resources for Setup
+  # ===============================================
+  
+  CustomSetupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'WBD-Setup-Helper-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      s3 = boto3.client('s3')
+                      bucket = event['ResourceProperties']['BucketName']
+                      
+                      # Create folder structure
+                      folders = [
+                          'reddit/socialgist-raw/',
+                          'socialgist-processed/',
+                          'socialgist-kb/',
+                          'sentiment-trend-analyzer/'
+                      ]
+                      
+                      for folder in folders:
+                          s3.put_object(Bucket=bucket, Key=folder)
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  SetupBucketStructure:
+    Type: Custom::SetupBucketStructure
+    Properties:
+      ServiceToken: !GetAtt CustomSetupFunction.Arn
+      BucketName: !Ref DataStorageBucket
+
+# ===============================================
+# Outputs
+# ===============================================
+
+Outputs:
+  DataStorageBucket:
+    Description: S3 bucket for data storage
+    Value: !Ref DataStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucket'
+
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !Ref BedrockKnowledgeBase
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
+
+  DataSourceId:
+    Description: Bedrock Data Source ID
+    Value: !Ref BedrockDataSource
+    Export:
+      Name: !Sub '${AWS::StackName}-DataSourceId'
+
+  DataCleanerFunctionArn:
+    Description: Data Cleaner Lambda Function ARN
+    Value: !GetAtt DataCleanerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataCleanerFunction'
+
+  SentimentAnalyzerFunctionArn:
+    Description: Sentiment Analyzer Lambda Function ARN
+    Value: !GetAtt SentimentAnalyzerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SentimentAnalyzerFunction'
+
+  QuickSightDataPath:
+    Description: S3 path for QuickSight data source
+    Value: !Sub 's3://${DataStorageBucket}/sentiment-trend-analyzer/sentiment-trends-quicksight.json'
+    Export:
+      Name: !Sub '${AWS::StackName}-QuickSightDataPath'
+
+  Environment:
+    Description: Environment name
+    Value: !Ref Environment
+    Export:
+      Name: !Sub '${AWS::StackName}-Environment'
+    ConstraintDescription: Must be a valid email address
+
+Resources:
+  # ===============================================
+  # S3 Storage Resources
+  # ===============================================
+  
+  DataStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketName}-${Environment}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt KBAutoSyncFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: socialgist-kb/
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Purpose
+          Value: Data Storage
+
+  # ===============================================
+  # IAM Roles and Policies
+  # ===============================================
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'WBD-Lambda-Execution-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock-agent:Retrieve
+                  - bedrock-agent:StartIngestionJob
+                  - bedrock-agent:GetIngestionJob
+                  - bedrock-agent:ListIngestionJobs
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'WBD-Bedrock-KB-Role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${DataStorageBucket}/socialgist-kb/*'
+                  - !GetAtt DataStorageBucket.Arn
+        - PolicyName: OpenSearchServerlessAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+
+  # ===============================================
+  # Lambda Functions
+  # ===============================================
+  
+  DataCleanerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'SGJsonExtractor-RawtoClean-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: Data-Cleaner
+
+  KBAutoSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'KB-AutoSync-OnS3Upload-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          DATA_SOURCE_ID: !Ref BedrockDataSource
+          S3_BUCKET: !Ref DataStorageBucket
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: KB-AutoSync
+
+  SentimentAnalyzerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'bulk-sentiment-analyzer-${Environment}'
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Code:
+        ZipFile: |
+          # Placeholder code - replace with actual deployment package
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Function deployed successfully')}
+      Environment:
+        Variables:
+          KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBase
+          S3_BUCKET: !Ref DataStorageBucket
+          MIN_MENTIONS_THRESHOLD: '3'
+          ENVIRONMENT: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+        - Key: Function
+          Value: Sentiment-Analyzer
+
+  # ===============================================
+  # Lambda Permissions
+  # ===============================================
+  
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref KBAutoSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt DataStorageBucket.Arn
+
+  # ===============================================
+  # OpenSearch Serverless for Bedrock
+  # ===============================================
+  
+  OpenSearchCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: !Sub 'wbd-sentiment-collection-${Environment}'
+      Type: VECTORSEARCH
+      Description: Vector collection for WBD sentiment analysis knowledge base
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: WBD-Sentiment-Analysis
+
+  OpenSearchSecurityPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-security-policy-${Environment}'
+      Type: encryption
+      Policy: !Sub |
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  OpenSearchNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-network-policy-${Environment}'
+      Type: network
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
+  OpenSearchDataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub 'wbd-sentiment-data-policy-${Environment}'
+      Type: data
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/wbd-sentiment-collection-${Environment}"],
+                "Permission": [
+                  "aoss:CreateCollectionItems",
+                  "aoss:DeleteCollectionItems",
+                  "aoss:UpdateCollectionItems",
+                  "aoss:DescribeCollectionItems"
+                ]
+              },
+              {
+                "ResourceType": "index",
+                "Resource": ["index/wbd-sentiment-collection-${Environment}/*"],
+                "Permission": [
+                  "aoss:CreateIndex",
+                  "aoss:DeleteIndex",
+                  "aoss:UpdateIndex",
+                  "aoss:DescribeIndex",
+                  "aoss:ReadDocument",
+                  "aoss:WriteDocument"
+                ]
+              }
+            ],
+            "Principal": [
+              "${BedrockKnowledgeBaseRole.Arn}"
+            ]
+          }
+        ]
+
+  # ===============================================
+  # Bedrock Knowledge Base
+  # ===============================================
+  
+  BedrockKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn: OpenSearchCollection
+    Properties:
+      Name: !Sub '${KnowledgeBaseName}-${Environment}'
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: OPENSEARCH_SERVERLESS
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt OpenSearchCollection.Arn
+          VectorIndexName: wbd-sentiment-index
+          FieldMapping:
+            VectorField: vector
+            TextField: text
+            MetadataField: metadata
+      Tags:
+        Environment: !Ref Environment
+        Project: WBD-Sentiment-Analysis
+
+  BedrockDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref BedrockKnowledgeBase
+      Name: !Sub 'WBD-S3-DataSource-${Environment}'
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt DataStorageBucket.Arn
+          InclusionPrefixes:
+            - socialgist-kb/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 500
+            OverlapPercentage: 20
+
+  # ===============================================
+  # CloudWatch Monitoring
+  # ===============================================
+  
+  SNSAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'WBD-Sentiment-Alerts-${Environment}'
+      DisplayName: WBD Sentiment Analysis Alerts
+      Subscription:
+        - Endpoint: !Ref NotificationEmail
+          Protocol: email
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'WBD-Lambda-Errors-${Environment}'
+      AlarmDescription: Alert when Lambda functions encounter errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  HighCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'WBD-High-Costs-${Environment}'
+      AlarmDescription: Alert when daily costs exceed threshold
+      MetricName: EstimatedCharges
+      Namespace: AWS/Billing
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      AlarmActions:
+        - !Ref SNSAlarmTopic
+
+  # ===============================================
+  # Custom Resources for Setup
+  # ===============================================
+  
+  CustomSetupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'WBD-Setup-Helper-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      s3 = boto3.client('s3')
+                      bucket = event['ResourceProperties']['BucketName']
+                      
+                      # Create folder structure
+                      folders = [
+                          'reddit/socialgist-raw/',
+                          'socialgist-processed/',
+                          'socialgist-kb/',
+                          'sentiment-trend-analyzer/'
+                      ]
+                      
+                      for folder in folders:
+                          s3.put_object(Bucket=bucket, Key=folder)
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  SetupBucketStructure:
+    Type: Custom::SetupBucketStructure
+    Properties:
+      ServiceToken: !GetAtt CustomSetupFunction.Arn
+      BucketName: !Ref DataStorageBucket
+
+# ===============================================
+# Outputs
+# ===============================================
+
+Outputs:
+  DataStorageBucket:
+    Description: S3 bucket for data storage
+    Value: !Ref DataStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucket'
+
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !Ref BedrockKnowledgeBase
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
+
+  DataSourceId:
+    Description: Bedrock Data Source ID
+    Value: !Ref BedrockDataSource
+    Export:
+      Name: !Sub '${AWS::StackName}-DataSourceId'
+
+  DataCleanerFunctionArn:
+    Description: Data Cleaner Lambda Function ARN
+    Value: !GetAtt DataCleanerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataCleanerFunction'
+
+  SentimentAnalyzerFunctionArn:
+    Description: Sentiment Analyzer Lambda Function ARN
+    Value: !GetAtt SentimentAnalyzerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SentimentAnalyzerFunction'
+
+  QuickSightDataPath:
+    Description: S3 path for QuickSight data source
+    Value: !Sub 's3://${DataStorageBucket}/sentiment-trend-analyzer/sentiment-trends-quicksight.json'
+    Export:
+      Name: !Sub '${AWS::StackName}-QuickSightDataPath'
+
+  Environment:
+    Description: Environment name
+    Value: !Ref Environment
+    Export:
+      Name: !Sub '${AWS::StackName}-Environment'
