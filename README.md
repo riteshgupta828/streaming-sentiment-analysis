@@ -170,13 +170,33 @@ your-streaming-sentiment-bucket/
 ## 🎨 Dashboard Previews
 
 ### Executive Summary Dashboard
-![Executive Dashboard](docs/images/executive-dashboard.png)
+**Top Streaming Properties by Sentiment**
 
-### Property Performance Matrix
-![Performance Matrix](docs/images/performance-matrix.png)
+| Property | Mentions | Sentiment | Trend | Action |
+|----------|----------|-----------|-------|---------|
+| Premium Streaming Service | 2,341 | 85% Positive | ↗️ | Monitor |
+| Movie Streaming Platform | 1,897 | 72% Positive | ↗️ | Monitor |
+| Sports Streaming | 1,234 | 64% Mixed+ | → | Review |
+| News Streaming | 892 | 45% Mixed- | ↘️ | **Action Needed** |
+| Kids Content | 567 | 38% Negative | ↘️ | **Action Needed** |
 
-### Sentiment Trends Over Time
-![Trend Analysis](docs/images/trend-analysis.png)
+### Sentiment Distribution
+Positive Properties: ██████████ 40% (2 properties)
+Mixed Properties:    ██████     20% (1 property)
+Negative Properties: ████████   40% (2 properties)
+
+### Key Themes Analysis
+1. **Content Quality** - Most discussed across all properties
+2. **Pricing Value** - Primary concern for negative sentiment
+3. **Technical Performance** - Critical for user experience
+4. **Content Variety** - Driver of positive sentiment
+
+### QuickSight Integration
+- Data source: `s3://bucket/sentiment-trend-analyzer/sentiment-trends-quicksight.json`
+- Refresh frequency: Daily
+- Dashboard users: Executive team, Product managers, Customer success
+
+[View Detailed Sample Data →](dashboards/sample-outputs/)
 
 ## 🧪 Testing
 
