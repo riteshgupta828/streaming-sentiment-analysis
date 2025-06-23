@@ -1,6 +1,6 @@
 # Streaming Service Portfolio Sentiment Analysis Platform
 
-> **Enterprise-grade sentiment analysis pipeline for multi-brand streaming portfolios using AWS serverless architecture**
+> **Enterprise serverless sentiment analysis pipeline for streaming services using AWS Lambda, Bedrock, and QuickSight**
 
 [![AWS](https://img.shields.io/badge/AWS-FF9900?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
 [![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
