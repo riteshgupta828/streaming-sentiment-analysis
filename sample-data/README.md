@@ -19,3 +19,9 @@ Example structure:
     }
   }
 }
+```
+
+## Output Format
+Results saved to: `sentiment-trend-analyzer/`
+
+_See main README for detailed output schema._
