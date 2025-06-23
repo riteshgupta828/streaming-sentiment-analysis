@@ -20,6 +20,8 @@ This project demonstrates a complete **serverless sentiment analysis pipeline** 
 
 ## 🏗️ Architecture
 
+![Architecture Diagram] (docs/images/architecture-diagram.png)
+
 ```mermaid
 graph TB
     A[Raw Social Media Data] --> B[S3 Raw Storage]
